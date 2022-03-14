@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+    <title>Estimación de fijación de CO2</title>
+
+    <style>
+      html, body, #viewDiv{
+        height: 100%;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+      }
+
+      #infoDiv{
+        padding: 6px;
+        width: 400px;
+        height: 97%;
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        overflow: auto;
+      }
+    </style>
+
+    <link rel="stylesheet" href="https://js.arcgis.com/4.21/esri/themes/light/main.css" />
+    <script src="https://js.arcgis.com/4.21/"></script>
+    <script type="module" src="https://js.arcgis.com/calcite-components/1.0.0-beta.69/calcite.esm.js" ></script>
+    <script nomodule="" src="https://js.arcgis.com/calcite-components/1.0.0-beta.69/calcite.js" ></script>
+    <link rel="stylesheet" type="text/css" href="https://js.arcgis.com/calcite-components/1.0.0-beta.69/calcite.css" />
+
+    <script>
+      require([
+        "esri/Map",
+        "esri/views/MapView",
+        "esri/layers/WMSLayer",
+        "esri/widgets/LayerList",
+        "esri/request",
+        "esri/geometry/Point",
+        "esri/core/watchUtils"
+      ], function (Map, MapView, WMSLayer, LayerList, esriRequest, Point, watchUtils) {
+
+        // mapa y vista
+        const map = new Map({basemap: "gray-vector"});
+        const view = new MapView({
+          container: "viewDiv",
+          map: map,
+          center: [2.55054, 46.90664],
+          zoom: 5,
+          popup: {
+            dockEnabled: false,
+            dockOptions: {
+              buttonEnabled: false
+            },
+            actions: [
+              {
+                id: "ver-catastro",
+                image: "https://www1.sedecatastro.gob.es/MasterPage/img/logosede2.png",
+                title: "Ver en la web de Catastro"
+              },
+              {
+                id: "fijacion-suelo",
+                className: "esri-icon-dashboard",
+                title: "Calcular fijación de CO2"                
+              }
+            ]
+          }
+        });
+
+
+        /*
+          Popup actions
+        */
+        view.popup.viewModel.includeDefaultActions = false;
+        view.popup.viewModel.on("trigger-action", (event) => {
+          if (event.action.id === "ver-catastro") {
+            
+            window.open("https://www1.sedecatastro.gob.es/CYCBienInmueble/OVCConCiud.aspx?del=" + del + "&mun=" + mun + "&RefC=" + fullRefCatastral);
+          }
+          else if(event.action.id === "fijacion-suelo") {
+            document.getElementById("refCatastralCalculo").innerHTML = refCatastral;
+            tamañoParcelaItem.value = (parseFloat(tam)/10000).toString().replace('.',',') + " ha";
+            modalPanel.active = true;
+          }
+        });
+        const wmsLayer = new WMSLayer({url: "https://ovc.catastro.meh.es/Cartografia/WMS/ServidorWMS.aspx"});
+        map.add(wmsLayer);
+        wmsLayer.when(() => {
+          view.goTo(wmsLayer.fullExtent);
+
+          view.on("click", (event) => {
+            let options = {
+              method: "post",
+              responseType: "xml",
+              query:{
+                SRS: "EPSG:4258",
+                Coordenada_X: event.mapPoint.longitude,
+                Coordenada_Y: event.mapPoint.latitude
+              }
+            };
+            let url = "http://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCoordenadas.asmx/Consulta_RCCOOR";
+            esriRequest(url, options).then(function (response) {
+              deepSearchCatastral(response.data);
+            });
+          });
+        });
+
+        // navegación modal
+        const modalPanel = document.getElementById("modal_panel_id");
+        const modalStepper = document.getElementById("modal_stepper_id");
+        const continuar1Button = document.getElementById("continuar_step1_id");
+        const continuar2Button = document.getElementById("continuar_step2_id");
+        const volver2Button = document.getElementById("volver_step2_id");
+        const volver3Button = document.getElementById("volver_step3_id");
+        const step1 = document.getElementById("step1_id");
+        const step2 = document.getElementById("step2_id");
+        const step3 = document.getElementById("step3_id");
+        continuar1Button.addEventListener("click", () =>{
+          if (document.getElementById("promotor_id").value == "" || document.getElementById("cif_id").value == "" ||
+              document.getElementById("proyecto_id").value == "" || document.getElementById("periodo_id").value == "" ||
+              document.getElementById("anno_id").value == ""){
+            customAlert("Por favor, compruebe que ha rellenado correctamente todos los campos del Paso 1 (Datos generales del proyecto)");
+            step1.error = true;
+            step1.complete = false;
+            return;
+          }
+          step2.disabled = false;
+          step2.removeAttribute("disabled");
+          step1.error = false;
+          step1.complete = true;
+          modalStepper.nextStep();
+        });
+        continuar2Button.addEventListener("click", () =>{
+          absorciones_totales = document.getElementById("absorciones_total_id").value;
+          if (absorciones_totales == "" || absorciones_totales == 0 || absorciones_totales == "NaN"){
+            customAlert("Por favor, compruebe que ha rellenado correctamente todos los campos del Paso 2 (Estimación absorción total)");
+            step2.error = true;
+            step2.complete = false;
+            return;
+          }
+          step3.disabled = false;
+          step3.removeAttribute("disabled");
+          step2.error = false;
+          step2.complete = true;
+          modalStepper.nextStep();
+        });
+        volver2Button.addEventListener("click", () => {
+          step1.complete = false;
+          step2.disabled = true;
+          step2.setAttribute("disabled", "true");
+          modalStepper.prevStep();
+        });
+        volver3Button.addEventListener("click", () => {
+          step2.complete = false;
+          step3.disabled = true;
+          step3.setAttribute("disabled", "true");
+          modalStepper.prevStep();
+        });
+        const calcularButton = document.getElementById("calcular_id");
+        calcularButton.addEventListener("click", () => {
+          // A absorciones_total_id -> int absorciones_previstas_final_id
+          // B 20% de A --> absorciones_registradas_utiles_id
+          // C 10% de B --> absorciones_bolsa_garantia_id
+          let absorciones = parseInt(absorciones_totales);
+          document.getElementById("absorciones_previstas_final_id").value = absorciones_totales;
+          document.getElementById("absorciones_registradas_utiles_id").value = (absorciones_totales * 0.2).toFixed(2);
+          document.getElementById("absorciones_bolsa_garantia_id").value = (absorciones_totales * 0.2 * 0.1).toFixed(2);
+        });
+        const empezarButton = document.getElementById("empezar_id");
+        empezarButton.addEventListener("click", () => {
+          tamañoParcelaItem.value = "";
+          promotorItem.value = "";
+          cifItem.value = "";
+          proyectoItem.value = "";
+          periodoItem.value = "";
+          annoItem.value = "";
+          absorcionesItem.value = "";
+          piesInput.value = "";
+          absorciones_previstas_final_item.value = "";
+          absorciones_registradas_utiles_item.value = "";
+          absorciones_bolsa_garantia_item.value = "";
+          absorciones_totales = "";
+          step1.complete = false;
+          step2.complete = false;
+          step3.complete = false;
+          step2.disabled = true;
+          step2.setAttribute("disabled", "true");
+          step3.disabled = true;
+          step3.setAttribute("disabled", "true");
+          modalStepper.startStep();
+          modalPanel.active = false;
+        });
+
+        // items modal
+        const promotorItem = document.getElementById("promotor_id");
+        const cifItem = document.getElementById("cif_id");
+        const proyectoItem = document.getElementById("proyecto_id");
+        const periodoItem = document.getElementById("periodo_id");
+        const annoItem = document.getElementById("anno_id");
+        const absorcionesItem = document.getElementById("absorciones_total_id");
+        const tamañoParcelaItem = document.getElementById("tamano_parcela_id");
+        const especiesCombo = document.getElementById("especies_combo");
+        const piesInput = document.getElementById("pies_id");
+        const absorciones_previstas_final_item = document.getElementById("absorciones_previstas_final_id");
+        const absorciones_registradas_utiles_item = document.getElementById("absorciones_registradas_utiles_id");
+        const absorciones_bolsa_garantia_item = document.getElementById("absorciones_bolsa_garantia_id");      
+        especiesCombo.addEventListener("calciteComboboxChange", (event) => {
+          document.getElementById("absorciones_unitarias_id").value = event.detail.selectedItems[0].value;
+          if(piesInput.value != ""){
+            document.getElementById("absorciones_total_id").value = document.getElementById("absorciones_unitarias_id").value * piesInput.value;
+          }
+        });
+        piesInput.addEventListener("calciteInputInput", () =>{
+          if (document.getElementById("absorciones_unitarias_id").value != ""){
+            document.getElementById("absorciones_total_id").value = document.getElementById("absorciones_unitarias_id").value * piesInput.value;
+          }
+        });
+
+
+      /*
+        Búsqueda por referencia catastral
+        13077A04600105  13077A046001050000MU  Polígono 46 Parcela 105 
+      */
+      let refCatastral, fullRefCatastral, del, mun, tam, absorciones_totales;
+      const clearQueryButton = document.getElementById("clear-query");
+      const queryCatastroButton = document.getElementById("query-catastro");
+      clearQueryButton.addEventListener("click", () => {
+        clear();
+      });
+      queryCatastroButton.addEventListener("click", async () => {
+
+        let options = {
+          method: "post",
+          responseType: "xml"
+        };
+        let url;
+
+        if(document.getElementById("ref_catastral_tab").active){
+
+          if(document.getElementById("ref_catastral_id").value == ""){
+            customAlert("Por favor, complete los campos de la búsqueda.");
+            return;
+          }
+
+          refCatastral = document.getElementById("ref_catastral_id").value;
+
+          options.query = {
+            SRS: "EPSG:4258",
+            Provincia: "",
+            Municipio: "",
+            RC: refCatastral
+          };
+          url = "https://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCoordenadas.asmx/Consulta_CPMRC";
+        }
+        else if(document.getElementById("pol_par_tab").active)
+        {
+
+          if(provinciaSelect.selectedOption.value == -1 ||
+                  municipioSelect.selectedOption.value == -1 ||
+                  document.getElementById("poligono_id").value == "" ||
+                  document.getElementById("parcela_id").value == "")
+          {
+            customAlert("Por favor, complete los campos de la búsqueda.");
+            return;            
+          }
+
+          options.query = {
+                Provincia: provinciaSelect.selectedOption.label,
+                Municipio: municipioSelect.selectedOption.label,
+                Poligono: document.getElementById("poligono_id").value,
+                Parcela: document.getElementById("parcela_id").value
+          };
+          url = "https://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejero.asmx/Consulta_DNPPP";
+        }
+
+        loader.active = true;
+        clearQueryButton.appearance = "outline";
+        queryCatastroButton.appearance = "solid";
+
+        esriRequest(url, options).then(function (response) {
+
+          loader.active = false;
+
+          let errorNodeList = response.data.firstChild.getElementsByTagName("lerr");
+          if (errorNodeList && errorNodeList.length > 0) {
+            customAlert("Ha sucedido un error al realizar la búsqueda: " + errorNodeList[0].getElementsByTagName("des")[0].innerHTML);
+          }
+          else
+          {
+            if(document.getElementById("ref_catastral_tab").active){
+              esriRequest("http://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejero.asmx/Consulta_DNPRC", options).then(function (deepResponse) {
+                showRefCatastral(response.data, deepResponse.data);
+              });
+            }
+            else
+            {
+              deepSearchCatastral(response.data);
+            }
+          }
+        });
+      });
+      function deepSearchCatastral(data){
+        let options = {
+          method: "post",
+          responseType: "xml"
+        };
+        let url;
+        refCatastral = data.getElementsByTagName("pc1")[0].innerHTML + data.getElementsByTagName("pc2")[0].innerHTML;
+        // Búsqueda por polígono/parcela -> no hay geometría
+        options.query = {
+          SRS: "EPSG:4258",
+          // Provincia: provinciaSelect.selectedOption.label,
+          // Municipio: municipioSelect.selectedOption.label,
+          Provincia: "",
+          Municipio: "",
+          RC: refCatastral
+        };
+        url = "https://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCoordenadas.asmx/Consulta_CPMRC";
+
+        esriRequest(url, options).then(function (response) {
+          options.query = {
+            Provincia: "",
+            Municipio: "",
+            RC: refCatastral
+          };
+          esriRequest("http://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejero.asmx/Consulta_DNPRC", options).then(function (deepResponse) {
+            showRefCatastral(response.data, deepResponse.data);
+          });
+        });
+      }
+      function showRefCatastral(data, deepData){
+
+        fullRefCatastral = refCatastral + deepData.getElementsByTagName("car")[0].innerHTML + deepData.getElementsByTagName("cc1")[0].innerHTML + deepData.getElementsByTagName("cc2")[0].innerHTML;
+        del = deepData.getElementsByTagName("cp")[0].innerHTML;
+        mun = deepData.getElementsByTagName("cm")[0].innerHTML;
+        tam = deepData.getElementsByTagName("ssp")[0].innerHTML;
+        
+        let coordenadas = data.firstChild.getElementsByTagName("coordenadas");
+        let geo = coordenadas[0].getElementsByTagName("geo");
+        let x = parseFloat(geo[0].getElementsByTagName("xcen")[0].innerHTML);
+        let y = parseFloat(geo[0].getElementsByTagName("ycen")[0].innerHTML);
+        let punto = new Point(x, y, view.map.spatialReference);
+        view.goTo({
+          target: punto,
+          zoom: 18
+        });
+
+        let content = "<b>Dirección: </b> " + coordenadas[0].getElementsByTagName("ldt")[0].innerHTML;
+        //content += "<br /> Coordenadas: [" + x + ", " + y + "]";
+        content += "<br /> <b>Clase de cultivo:</b> " + deepData.getElementsByTagName("dcc")[0].innerHTML;
+        content += "<br /> <b>Tamaño de la parcela:</b> " + tam + "m2";
+        //content += "<br /> <b>Ver en la web de Catastro:</b> <a target='_blank' href='https://www1.sedecatastro.gob.es/CYCBienInmueble/OVCConCiud.aspx?del=" + del + "&mun=" + mun + "&RefC=" + fullRefCatastral + "'> Catastro </a>";
+
+        view.popup.open({
+          title: "Referencia catastral: " + refCatastral,
+          location: punto,
+          content: content
+        });
+      }
+
+
+      /*
+        Búsqueda por polígono y parcela (+ provincia y municipio)
+      */
+      const provinciaSelect = document.getElementById("provincia_select");
+      const municipioSelect = document.getElementById("municipio_select");
+      provinciaSelect.addEventListener('calciteSelectChange', (event) => {
+        if(event.target.selectedOption.value != -1){
+
+          loader.active = true;
+          municipioSelect.disabled = false;
+          municipioSelect.innerHTML = "";
+
+          const options = {
+            method: "post",
+            responseType: "xml",
+            query: {
+              Provincia: event.target.selectedOption.label,
+              Municipio: ""
+            }
+					};
+          esriRequest("http://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejero.asmx/ConsultaMunicipio", options).then(function (response) {
+            let elements = response.data.firstChild.lastElementChild.getElementsByTagName("muni");
+            for (let element of elements) {
+              console.log(element.id);
+              let municipio = element.getElementsByTagName("nm")[0].textContent;
+              let opt = document.createElement('calcite-option');
+              opt.value = municipio;
+              opt.label = municipio;
+              opt.setAttribute("data-del", element.getElementsByTagName("cd")[0].textContent);
+              municipioSelect.appendChild(opt);
+            }
+            document.getElementById("poligono_id").removeAttribute("read-only");
+            document.getElementById("parcela_id").removeAttribute("read-only");
+            loader.active = false;
+          });
+        }
+        else {
+          clear();
+        }
+      });
+      
+
+      /*
+        Funciones auxiliares
+      */
+      function customAlert(alert){
+        document.getElementById("alert_title").innerHTML = alert;
+        document.getElementById("alert_id").setAttribute("active","true");
+      }
+      function clear(){
+        clearQueryButton.appearance = "solid";
+        queryCatastroButton.appearance = "outline";
+        view.popup.close();
+        document.getElementById("ref_catastral_id").value = "";
+        document.getElementById("poligono_id").value = "";
+        document.getElementById("poligono_id").setAttribute("read-only", "true");
+        document.getElementById("parcela_id").value = "";
+        document.getElementById("parcela_id").setAttribute("read-only", "true");
+        municipioSelect.disabled = true;
+        municipioSelect.innerHTML = "";
+        provinciaSelect.firstElementChild.selected = true;
+      }
+
+    });
+
+    </script>
+  </head>
+
+  <body>
+    
+    <!-- mapa -->
+    <div id="viewDiv"></div>
+
+    <!-- panel lateral -->
+    <calcite-panel id="infoDiv" class="calcite-theme-light">
+      <h3 class="heading" slot="header-content">
+        Consultar parcela catastral
+      </h3>
+      <div id="content" style="padding: 10px">
+
+        <div style="padding: 10px;">
+          <calcite-label>Si conoces la ubicación de la parcela, puedes hacer clic en el mapa. </calcite-label>
+          <calcite-label>Si no la conoces, puedes utilizar las herramientas de búsqueda por Referencia Catastral o mediante los número de polígono y parcela.</calcite-label>
+        </div>
+
+        <calcite-tabs layout="inline" >
+          <calcite-tab-nav slot="tab-nav">
+              <calcite-tab-title active>Referencia catastral</calcite-tab-title>
+              <calcite-tab-title>Polígono y parcela</calcite-tab-title>
+          </calcite-tab-nav>
+          <calcite-tab style="display: inherit;" id="ref_catastral_tab" active>
+            <div style="padding: 10px;">
+              <calcite-label>Número de referencia catastral:
+                <calcite-input id="ref_catastral_id" value="13077A04600105"></calcite-input>
+              </calcite-label>
+            </div>
+          </calcite-tab>
+
+          <calcite-tab style="display: inherit;" id="pol_par_tab">
+            <div style="padding: 10px;">
+              <calcite-label>
+                Provincia:
+                <calcite-select label="Seleccionar provincia" id="provincia_select" scale="m" width="auto">
+                  <calcite-option label="Seleccionar provincia" value="-1"></calcite-option>
+                  <calcite-option label="Madrid" value="28"></calcite-option>
+                  <calcite-option label="Ciudad Real" value="13"></calcite-option>
+                  <calcite-option label="Murcia" value="30"></calcite-option>
+                </calcite-select>
+              </calcite-label>
+              <calcite-label>
+                Municipio:
+                <calcite-select id="municipio_select" disabled="true" scale="m" width="auto">
+                </calcite-select>
+              </calcite-label>
+              <calcite-label>Polígono:
+                <calcite-input id="poligono_id" placeholder="Ej: 46" value="" read-only="true"></calcite-input>
+              </calcite-label>
+              <calcite-label>Parcela:
+                <calcite-input id="parcela_id" placeholder="Ej: 105" value="" read-only="true"></calcite-input>
+              </calcite-label>
+            </div>
+          </calcite-tab>
+
+      </calcite-tabs>
+
+      <br />
+        <div
+          style="max-width: 80%; display: flex;flex-direction: row;"
+        >
+          <calcite-button
+            id="query-catastro"
+            width="half"
+            appearance="solid"
+            alignment="center"
+            scale="m"
+          >
+            Consultar
+          </calcite-button>
+          <calcite-button
+            id="clear-query"
+            width="half"
+            appearance="outline"
+            alignment="center"
+            scale="m"
+          >
+            Limpiar selección
+          </calcite-button>
+        </div>
+        <br />
+        <calcite-loader id="loader" type="indeterminate"></calcite-loader>
+      </div>
+
+    </calcite-panel>
+
+    <!-- panel modal CO2 -->
+    <calcite-modal id="modal_panel_id" aria-labelledby="modal-title" width="l">
+      <div slot="header" id="modal-title">Calcular fijación de CO2 para la parcela: <span id="refCatastralCalculo"></span></div>
+
+      <div slot="content">
+        <calcite-stepper id="modal_stepper_id" icon layout="horizontal" >
+          
+          <calcite-stepper-item id="step1_id" item-title="Datos generales del proyecto" item-subtitle="" active>
+            <calcite-label>Tamaño total de la parcela: 
+              <calcite-input scale="m" id="tamano_parcela_id" read-only="true" value="" ></calcite-input>
+            </calcite-label>
+            <calcite-label>Promotor del proyecto:
+              <calcite-input scale="m" id="promotor_id" placeholder="Ej: John Doe" value="" ></calcite-input>
+            </calcite-label>
+            <calcite-label>CIF/NIF:
+              <calcite-input scale="m" id="cif_id" placeholder="Ej: 12345678A" value="" ></calcite-input>
+            </calcite-label>
+            <calcite-label>Nombre del proyecto:
+              <calcite-input scale="m" id="proyecto_id" placeholder="Ej: A orillas del Ebro" value="" ></calcite-input>
+            </calcite-label>
+            <calcite-label>Periodo de permanencia:       
+              <calcite-input scale="m" id="periodo_id" placeholder="Ej: 34" value="" ></calcite-input>
+            </calcite-label>
+            <calcite-label>Año de inicio del proyecto:
+              <calcite-input scale="m" id="anno_id" placeholder="Ej: 2022" value="" ></calcite-input>
+            </calcite-label>
+
+            <div style="width: 500px; max-width: 100%; display: flex;flex-direction: row;">
+              <calcite-button
+                icon-end="arrow-right" 
+                id="continuar_step1_id"
+                width="half"
+                appearance="solid"
+                alignment="center"
+                scale="m">
+                Continuar 
+              </calcite-button>             
+            </div>
+
+          </calcite-stepper-item>
+
+          <calcite-stepper-item id="step2_id" item-title="Estimación absorción total" item-subtitle="" disabled >
+            <calcite-tabs scale="m">
+              <calcite-tab-nav slot="tab-nav">
+                  <calcite-tab-title active>Opción A</calcite-tab-title>
+                  <calcite-tab-title>Opción B</calcite-tab-title>
+              </calcite-tab-nav>
+              <calcite-tab active>
+                <calcite-label>
+                  En los casos en que el fin de la repoblación no sea productivo o bien, que el turno de corta previsto sea superior al periodo de permanencia, se escogerá la Opción A (Repoblaciones sin aprovechamiento maderero o de aprovechamiento no intensivo)
+                </calcite-label>
+
+                <calcite-label>Especie:
+                  <calcite-combobox id="especies_combo" max-items="0" selection-mode="single">
+                    <calcite-combobox-item value="3" text-label="Eucalyptus globulus"></calcite-combobox-item>
+                    <calcite-combobox-item value="2.88" text-label="Picea abies"></calcite-combobox-item>
+                    <calcite-combobox-item value="1.56" text-label="Pinus radiata"></calcite-combobox-item>
+                    <calcite-combobox-item value="1.24" text-label="Salix spp"></calcite-combobox-item>
+                    <calcite-combobox-item value="0.92" text-label="Populus alba"></calcite-combobox-item>
+                  </calcite-combobox>
+                </calcite-label>
+
+                <calcite-label>Número de pies objetivo:
+                  <calcite-input scale="m" id="pies_id" placeholder="Ej: 40" value="" ></calcite-input>
+                </calcite-label>
+                <calcite-label>Absorciones unitarias por sp (t CO2):
+                  <calcite-input scale="m" id="absorciones_unitarias_id" read-only="true" value="" ></calcite-input>
+                </calcite-label>
+                <calcite-label>Total (t CO2):
+                  <calcite-input scale="m" id="absorciones_total_id" read-only="true" value="" ></calcite-input>
+                </calcite-label>
+
+              </calcite-tab>
+
+                <calcite-tab>
+                  <calcite-label>
+                    Por otro lado, en caso de tratarse de repoblaciones de aprovechamiento intensivo cuyo turno de corta sea inferior al periodo de permanencia, se escogerá la Opción B (Repoblaciones de aprovechamiento intensivo, cortas a hecho)
+                  </calcite-label>
+                </calcite-tab>
+            </calcite-tabs>
+
+            <div style="width: 500px; max-width: 100%; display: flex;flex-direction: row;">
+              <calcite-button
+                icon-start="arrow-left" 
+                id="volver_step2_id"
+                width="half"
+                appearance="outline"
+                alignment="center"
+                scale="m">
+                Volver 
+              </calcite-button>  
+              <calcite-button
+                icon-end="arrow-right" 
+                id="continuar_step2_id"
+                width="half"
+                appearance="solid"
+                alignment="center"
+                scale="m">
+                Continuar 
+              </calcite-button>             
+            </div>
+
+          </calcite-stepper-item>
+
+          <calcite-stepper-item id="step3_id" item-title="Absorciones disponibles" item-subtitle="" disabled >
+            <div style="padding:10px">
+              <calcite-label>
+                A continuación se presentan las absorciones estimadas para todo el periodo clasificadas según los criterios y limitaciones establecidos en el Registro. Las absorciones previstas al final del periodo de permanencia se corresponden con las absorciones inscritas (A). 
+              </calcite-label>
+              <calcite-label>
+                De éstas, el promotor del proyecto únicamente podrá retirar  la totalidad o parte de las absorciones disponibles. Para obtener las absorciones disponibles, se aplicarán dos descuentos sobre las absorciones estimadas al final del periodo de permanencia:
+              </calcite-label>
+              <calcite-label>
+                <ul>
+                  <li>Sólo se podrá retirar un 20% de las absorciones totales previstas. Estas absorciones se denominan absorciones registradas útiles (B).</li>
+                  <li>A la bolsa de garantía se destinará una cantidad de absorciones (C) equivalente al 10% de las absorciones disponibles.</li>
+                </ul>
+              </calcite-label>
+            </div>
+            <div>
+              <calcite-label layout="inline">
+                <b>A:</b> Absorciones previstas al final del periodo de permanencia. 
+              </calcite-label>
+              <calcite-label scale="m">
+                <calcite-input id="absorciones_previstas_final_id" read-only="true" value="" ></calcite-input>
+              </calcite-label>
+              <calcite-label layout="inline">
+                <b>B:</b> Absorciones registradas útiles = 20% * A. 
+              </calcite-label>
+              <calcite-label scale="m">
+                <calcite-input id="absorciones_registradas_utiles_id" read-only="true" value="" ></calcite-input>
+              </calcite-label>
+              <calcite-label layout="inline">
+                <b>C:</b> Absorciones cedidas a la BOLSA DE GARANTÍA (10% de las absorciones disponibles)
+              </calcite-label>
+              <calcite-label scale="m">
+                <calcite-input id="absorciones_bolsa_garantia_id" read-only="true" value="" ></calcite-input>
+              </calcite-label>
+            </div>
+
+            <div style="width: 500px; max-width: 100%; display: flex;flex-direction: row;">
+              <calcite-button
+                icon-start="arrow-left" 
+                id="volver_step3_id"
+                width="half"
+                appearance="outline"
+                alignment="center"
+                scale="m">
+                Volver 
+              </calcite-button>
+              <calcite-button
+                icon-end="automation" 
+                id="calcular_id"
+                width="half"
+                appearance="solid"
+                alignment="center"
+                scale="m">
+              Calcular 
+              </calcite-button>
+              <calcite-button
+                icon-end="file-report" 
+                id="exportar_id"
+                width="half"
+                appearance="solid"
+                alignment="center"
+                scale="m"
+                disabled
+              >
+                Exportar datos
+              </calcite-button>
+
+            </div>
+          </calcite-stepper-item>
+
+        </calcite-stepper>
+      </div>
+
+      <calcite-button slot="primary" id="empezar_id" width="full">Volver a la selección de parcelas</calcite-button>
+    </calcite-modal>
+  
+    <!-- mensajes de error -->
+    <calcite-alert id="alert_id" auto-dismiss auto-dismiss-duration="fast" color="red" icon="exclamation-mark-triangle">
+      <div slot="title" id="alert_title">Por favor, complete los campos de búsqueda</div>
+    </calcite-alert>
+
+  </body>
+</html>
